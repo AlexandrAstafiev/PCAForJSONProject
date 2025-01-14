@@ -1,13 +1,18 @@
+# import project files
+import ArticleGraphs
+
 import json
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.decomposition import PCA
+import scipy.signal
+import sklearn
 import time
 import random
 
 # Библиотеки поиска максимумов
 from scipy import signal
 from scipy.signal import argrelmax
+from scipy.stats import entropy
 
 
 import os
@@ -230,12 +235,31 @@ def voidDetectorKalmanPCA(dataToAnalyze):
         # Производим поиск локальных максимумов сигнала
 
 
-        stepSize=200
+        stepSize=180
+        entropyMass = []
         fullity=[]
-        for i in range(int(len(firstTresPCA)/stepSize)):
-            fullity.append(np.sum(np.abs(firstTresPCA[i*stepSize:i*stepSize+stepSize])))
+        delta=int(stepSize/2)
 
 
+        ##
+        ##      Нормализация, чтобы энтропия считалась
+        ## firstPCA = sklearn.preprocessing.normalize([firstPCA])
+        ##
+
+        for i in range(int(len(firstPCA)/delta)):
+            if (i==0):
+                fullity.append(np.average(np.abs(firstPCA[i*stepSize:(i*stepSize+delta)])))
+                entropyMass.append(entropy(firstPCA[i*stepSize:(i*stepSize+delta)], base=2))
+            if (i>0):
+                fullity.append(np.average(np.abs(firstPCA[i*stepSize-delta:i*stepSize+delta])))
+                entropyMass.append(entropy(firstPCA[i*stepSize-delta:i*stepSize+delta], base=2))
+            if (i < int(len(firstPCA)/delta)):
+                fullity.append(np.average(np.abs(firstPCA[i * stepSize - delta:i * stepSize])))
+                entropyMass.append(entropy(firstPCA[i * stepSize - delta:i * stepSize], base=2))
+        entropyMass = np.asarray(entropyMass).T
+
+        print("размер массива энтропии "+str(entropyMass.shape))
+        print(fullity)
 
 
 
@@ -247,8 +271,8 @@ def voidDetectorKalmanPCA(dataToAnalyze):
                               X_pca[1], X_pca[2],
                               firstPCA, secondPCA,
                               firstTresPCA, secondTresPCA,
-                              fullity, secondMaxesMedTresPCA,
-                              firstMaxesMedTresPCA, secondMaxesMedTresPCA)
+                              fullity, entropyMass,
+                              entropyMass, secondMaxesMedTresPCA)
 
 
 
@@ -446,13 +470,82 @@ def tryPCA():
     # check how much variance is explained by each principal component
     print(principal.explained_variance_ratio_)
 
+def lowpassButter(data: np.ndarray, cutoff: float, sample_rate: float, poles: int = 5):
+    sos = scipy.signal.butter(poles, cutoff, 'lowpass', fs=sample_rate, output='sos')
+    filtered_data = scipy.signal.sosfiltfilt(sos, data)
+    # Code used to display the result
+    '''
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 3), sharex=True, sharey=True)
+    ax1.plot(data)
+    ax1.set_title("Original Signal")
+    ax1.margins(0, .1)
+    ax1.grid(alpha=.5, ls='--')
+    ax2.plot(filtered_data)
+    ax2.set_title("Low-Pass Filter (50 Hz)")
+    ax2.grid(alpha=.5, ls='--')
+    plt.tight_layout()
+    plt.show()
+    '''
+    return filtered_data
+
+def highpassButter(data: np.ndarray, cutoff: float, sample_rate: float, poles: int = 5):
+    sos = scipy.signal.butter(poles, cutoff, 'highpass', fs=sample_rate, output='sos')
+    filtered_data = scipy.signal.sosfiltfilt(sos, data)
+    # Code used to display the result
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 3), sharex=True, sharey=True)
+    ax1.plot(data)
+    ax1.set_title("Original Signal")
+    ax1.margins(0, .1)
+    ax1.grid(alpha=.5, ls='--')
+    ax2.plot(filtered_data)
+    ax2.set_title("High-Pass Filter (20 Hz)")
+    ax2.grid(alpha=.5, ls='--')
+    plt.tight_layout()
+    plt.show()
+    return filtered_data
+
+def bandpassButter(data: np.ndarray, edges: list[float], sample_rate: float, poles: int = 5):
+    sos = scipy.signal.butter(poles, edges, 'bandpass', fs=sample_rate, output='sos')
+    filtered_data = scipy.signal.sosfiltfilt(sos, data)
+    # Code used to display the result
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 3), sharex=True, sharey=True)
+    ax1.plot(data)
+    ax1.set_title("Original Signal")
+    ax1.margins(0, .1)
+    ax1.grid(alpha=.5, ls='--')
+    ax2.plot(filtered_data)
+    ax2.set_title("Band-Pass Filter (10-50 Hz)")
+    ax2.grid(alpha=.5, ls='--')
+    plt.tight_layout()
+    plt.show()
+    return filtered_data
+
+
+def lowPassCutoffFrequencyButter(data: np.ndarray, sample_rate: float):
+    # Load sample data from a WAV file
+
+    times = np.arange(len(data)) / sample_rate
+
+    # Plot the original signal
+    plt.plot(times, data, '.-', alpha=.5, label="original signal")
+
+    # Plot the signal low-pass filtered using different cutoffs
+    for cutoff in [20,15,12,6,4,2]:
+        sos = scipy.signal.butter(5, cutoff, 'lowpass', fs=sample_rate, output='sos')
+        filtered = scipy.signal.sosfiltfilt(sos, data)
+        plt.plot(times, filtered, label=f"low-pass {cutoff} Hz")
+
+    plt.legend()
+    plt.grid(alpha=.5, ls='--')
+    #plt.axis([0.35, 0.5, None, None])
+    plt.show()
+
 
 if __name__ == '__main__':
     # Работа с большим набором
     filename_full = "d://!!!CSI-Movement//My_25.11.2024//data_apml.json"
     dataset_full, countPackets = loadDataSet(filename_full)
     frameSize = 180
-
 
     # Для PCA необходима рамерность 2
     # Мы получаем размерность 3 (56х9хt)
@@ -461,11 +554,43 @@ if __name__ == '__main__':
 
     sub_x = np.zeros(shape=(9,56,countPackets))
     for i in range(9):
-        sub_x[i] = dataset_full[:,i,:]
+        sub_x[i] = dataset_full[:,i,:]                    # (9, 56, 36048)
     print(sub_x.shape)
 
+    # Вывод первого графика для статьи
+    ArticleGraphs.drawFirstGraph(sub_x)
+
+    # Вывод второго графика для статьи
+    ArticleGraphs.drawSecondGraph(sub_x[0][0])
+
+    # Фильтр низких частот Баттерворта
+    butter_sub_x = np.zeros(shape=(9, 56, countPackets))
+    for i in range(9):
+        for j in range(56):
+            # Здесь 5 Гц - это значение, которое не пропускает ничего больше 5 Гц (видимо)
+            butter_sub_x[i][j] = lowpassButter(sub_x[i][j], 5, 180)
+
+    # Вывод третьего графика для статьи
+    ArticleGraphs.drawThirdGraph(kalmanFilter(sub_x[0][0]))
+
+    # Фильтр высоких частот Баттерворта
+    #highpassButter(low, 5, 180)
+    #
+    #highpassButter(sub_x[0][0], 5, 180)
+
+    # Фильтр по полосе пропускания
+    bandPassRange = [1, 89]
+
+    #bandpassButter(sub_x[0][0], range, 180)
+
+    #for i in range(9):
+    #    bandpassButter(lowpassButter(sub_x[0][i], 5, 180), bandPassRange, 180)
+
+    #lowPassCutoffFrequencyButter(sub_x[0][1], frameSize)
+
     voidDetectorKalmanPCA(sub_x[1])
-    #voidDetectorKalmanPCA(sub_x[1])
+    voidDetectorKalmanPCA(butter_sub_x[1])
+
     #voidDetector(sub_x[1])
     '''
     class1_full = extractData(dataset_full, 3100, 10000, frameSize)
@@ -515,7 +640,7 @@ if __name__ == '__main__':
     start_time = time.time()
 
     #history = model.fit(trainX, trainY, epochs=10, batch_size=3, validation_data=(testX, testY), verbose=2)
-    history = model.fit(trainX, trainY, epochs=10, batch_size=3, validation_split=0.2, verbose=2)
+    history = model.fit(trainX, trainY, epochs=12, batch_size=3, validation_split=0.2, verbose=2)
 
     print("--- cуммарно %s секунд ---" % (time.time() - st))
 
@@ -563,9 +688,8 @@ if __name__ == '__main__':
     print(class3)
     print("Точность на классе " + str(class3 / len(result)*100))
 
+
     '''
-
-
     '''
     plt.figure(figsize=(16, 8))
     plt.plot(dataset_full.T)
